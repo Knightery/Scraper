@@ -4,58 +4,42 @@ from sklearn.preprocessing import LabelEncoder
 from datasets import Dataset
 from transformers import DistilBertTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import json
+import os
 
-# Load the Excel file
-file_path = "C:\\Users\\nyter\\Desktop\\Scraper\\trainingdata.xlsx"  # Ensure correct path
-data = pd.read_excel(file_path)
+# Set up the Google Sheets API client
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("googleauth.json", scope)
+client = gspread.authorize(creds)
 
-# Drop rows where either the description or tag is missing
-data = data.dropna(subset=['Description', 'Tag'])
+# Function to load data from Google Sheets
+def load_data(sheet_name, tab_name):
+    sheet = client.open(sheet_name).worksheet(tab_name)
+    data = sheet.get_all_records()
+    return pd.DataFrame(data), sheet
 
-# Extract descriptions and tags
-descriptions = data['Description'].tolist()
-tags = data['Tag'].tolist()
-
-# Convert tags to numerical labels
-label_encoder = LabelEncoder()
-labels = label_encoder.fit_transform(tags)
-
-# Save label mapping
-label_mapping = dict(zip(label_encoder.classes_, label_encoder.transform(label_encoder.classes_)))
-print("Label Mapping: ", label_mapping)
-
-# Create a pandas DataFrame with descriptions and labels
-df = pd.DataFrame({'text': descriptions, 'label': labels})
-
-# Convert the DataFrame to Hugging Face Dataset
-dataset = Dataset.from_pandas(df)
-
-# Split into train and test sets (80% train, 20% test)
-train_test_split = dataset.train_test_split(test_size=0.2)
-train_dataset = train_test_split['train']
-test_dataset = train_test_split['test']
-
-# Preview the first example in the training set
-print(train_dataset[0])
+# Function to preprocess data for training
+def preprocess_training_data(df):
+    df = df.dropna(subset=['Description', 'Category'])
+    descriptions = df['Description'].tolist()
+    tags = df['Category'].tolist()
+    label_encoder = LabelEncoder()
+    labels = label_encoder.fit_transform(tags)
+    label_mapping = dict(zip(label_encoder.classes_, label_encoder.transform(label_encoder.classes_)))
+    df = pd.DataFrame({'text': descriptions, 'label': labels})
+    return df, label_encoder, label_mapping
 
 # Load the DistilBERT tokenizer
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
 
-# Tokenize the dataset
-def tokenize(batch):
-    return tokenizer(batch['text'], padding=True, truncation=True)
+def tokenize_dataset(dataset, tokenizer):
+    def tokenize(batch):
+        return tokenizer(batch['text'], padding='max_length', truncation=True, max_length=512)
+    return dataset.map(tokenize, batched=True, batch_size=64)
 
-train_dataset = train_dataset.map(tokenize, batched=True, batch_size=64)
-test_dataset = test_dataset.map(tokenize, batched=True, batch_size=64)
-
-# Load the pre-trained DistilBERT model for sequence classification
-model = DistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=len(label_mapping))
-
-# Move the model to the appropriate device (GPU or CPU)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-
-# Define compute metrics function for evaluation
+# Function to compute metrics
 def compute_metrics(p):
     preds = p.predictions.argmax(-1)
     labels = p.label_ids
@@ -63,55 +47,61 @@ def compute_metrics(p):
     acc = accuracy_score(labels, preds)
     return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
 
-# Define training arguments
-training_args = TrainingArguments(
-    output_dir='./results',
-    evaluation_strategy='epoch',
-    learning_rate=2e-5,
-    per_device_train_batch_size=32,
-    per_device_eval_batch_size=32,
-    num_train_epochs=10,
-    weight_decay=0.01,
-    save_total_limit=2,
-    fp16=True  # Enable mixed precision training
-)
+# Main function
+def main():
+    df, _ = load_data("MAIN", "TrainingData")
+    df, label_encoder, label_mapping = preprocess_training_data(df)
+    dataset = Dataset.from_pandas(df)
+    train_test_split = dataset.train_test_split(test_size=0.2)
+    train_dataset = train_test_split['train']
+    test_dataset = train_test_split['test']
+    
+    tokenizer_path = './fine-tuned-distilbert/tokenizer'
+    model_path = './fine-tuned-distilbert/model'
 
-# Define Trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=test_dataset,
-    compute_metrics=compute_metrics  # Include custom metrics
-)
+    # Check if tokenizer exists
+    if os.path.exists(tokenizer_path):
+        tokenizer = DistilBertTokenizer.from_pretrained(tokenizer_path)
+    else:
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        tokenizer.save_pretrained(tokenizer_path)  # Save the tokenizer
 
-# Train the model
-trainer.train()
+    # Tokenize the datasets
+    train_dataset = tokenize_dataset(train_dataset, tokenizer)
+    test_dataset = tokenize_dataset(test_dataset, tokenizer)
 
-# Evaluate the model
-results = trainer.evaluate()
-print("Evaluation Results:", results)
+    # Check if model directory exists
+    if os.path.exists(model_path):
+        model = DistilBertForSequenceClassification.from_pretrained(model_path, num_labels=len(label_mapping))
+    else:
+        model = DistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=len(label_mapping))
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    print(f"Using device: {device}")
+    training_args = TrainingArguments(
+        output_dir='./results',
+        eval_strategy='epoch',
+        learning_rate=2e-5,
+        per_device_train_batch_size=32,
+        per_device_eval_batch_size=32,
+        num_train_epochs=10,
+        weight_decay=0.01,
+        save_total_limit=2,
+        fp16=True
+    )
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=test_dataset,
+        compute_metrics=compute_metrics
+    )
+    trainer.train()
+    results = trainer.evaluate()
+    print("Evaluation Results:", results)
+    model.save_pretrained("./fine-tuned-distilbert")
+    tokenizer.save_pretrained("./fine-tuned-distilbert")
 
-# Save the model and tokenizer
-model.save_pretrained("./fine-tuned-distilbert")
-tokenizer.save_pretrained("./fine-tuned-distilbert")
-
-# Tokenize new descriptions for prediction
-new_descriptions = [
-    "Bros NEVER trying to setup a trap again💀Use code:KQDEE in the item shop❤️#fortnite #fortnitefunny",
-    "#martialarts Don't Blink or you will miss it. #artesmarcias #selfdefense",
-    "Yoru 200IQ ulti 😳 #valorant #valorantclips",
-    "he's a great painter from austria #shrots #darkhumor #germany #ww2",
-    "pranking my teacher", "bollywood movie", "avengeres episode 2"
-]
-
-inputs = tokenizer(new_descriptions, return_tensors="pt", padding=True, truncation=True)
-inputs = {k: v.to(device) for k, v in inputs.items()}  # Move inputs to the same device as the model
-
-# Get predictions
-outputs = model(**inputs)
-predictions = outputs.logits.argmax(dim=-1)
-
-# Convert predictions back to tags
-predicted_tags = label_encoder.inverse_transform(predictions.cpu().numpy())
-print("Predicted Tags: ", predicted_tags)
+if __name__ == "__main__":
+    main()

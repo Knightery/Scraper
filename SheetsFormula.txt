@@ -1,0 +1,22 @@
+=IF(D4="", 
+    IF(OR(ISNUMBER(SEARCH({"Animal","dinosaur","Pet","Dog","Cat"}, C4))), "animal", 
+    IF(OR(ISNUMBER(SEARCH({"Dance","ASMR","Song","Sing","#Art","Dancing","Crafts","Art","Clay"}, C4))), "arts", 
+    IF(OR(ISNUMBER(SEARCH({"Makeup","Hairstyle","Hair","dress","Glowup","beauty","Dye","Outfit"}, C4))), "beauty", 
+    IF(OR(ISNUMBER(SEARCH({"Car","Motorsport","#car","Porsche","Cars","Formula1","F1","Racing"}, C4))), "car", 
+    IF(OR(ISNUMBER(SEARCH({"Edit","Transition","Animation"}, C4))), "content", 
+    IF(OR(ISNUMBER(SEARCH({"Food","Cook","Baking","Foodie","Vitamin"}, C4))), "cooking", 
+    IF(OR(ISNUMBER(SEARCH({"Fortnite","Minecraft","Game","Brawl Stars","Gaming","Roblox"}, C4))), "gaming", 
+    IF(OR(ISNUMBER(SEARCH({"Workout","Gym","Lift","Barbell"}, C4))), "gym", 
+    IF(OR(ISNUMBER(SEARCH({"designing","design","bedroom","bed","kids","home","mother","father","family","house","baby"}, C4))), "home", 
+    IF(OR(ISNUMBER(SEARCH({"funny","meme","haha","prank","comedy","troll"}, C4))), "meme", 
+    IF(OR(ISNUMBER(SEARCH({"sigma","motivation","quotes","grind","success","discipline"}, C4))), "motivational", 
+    IF(OR(ISNUMBER(SEARCH({"movie","film","tv","show","episode","celebrity","Bollywood","Hollywood"}, C4))), "movie", 
+    IF(OR(ISNUMBER(SEARCH({"news","country","world"}, C4))), "news", 
+    IF(OR(ISNUMBER(SEARCH({"camping","camp","outdoors","woodworking","truck","tools","hardware","survival","bushcraft"}, C4))), "outdoors", 
+    IF(OR(ISNUMBER(SEARCH({"learn","marketing","business","office","learning","presentation"}, C4))), "professional", 
+    IF(OR(ISNUMBER(SEARCH({"soccer","football","baseball","sport","skating","skate"}, C4))), "sports", 
+    IF(OR(ISNUMBER(SEARCH({"gadget","apple","samsung","laptop","phone","iPhone","tech","gadgets"}, C4))), "tech", 
+    IF(OR(ISNUMBER(SEARCH({"travel","tourism","visit","plane","airline","airplane","vlog"}, C4)))
+	IF(OR(C4="Car", C4="#Car"), "car",
+	"other"
+))))))))))))))))))))
